@@ -65,6 +65,7 @@ func (j *Job) findStepIndexByTitle(title string) (int, error) {
 }
 
 func (c *Client) loadAPIKey() {
+	fmt.Println("Checking for API key...")
 	apiKey, exists := os.LookupEnv("API_KEY")
 	if exists == true {
 		c.APIKey = apiKey
@@ -83,6 +84,7 @@ func (c *Client) loadAPIKey() {
 }
 
 func (c *Client) getAuthToken() {
+	fmt.Println("Fetching Access Token...")
 	rel := &url.URL{Path: "/token"}
 	u := c.BaseURL.ResolveReference(rel)
 
@@ -110,6 +112,7 @@ func (c *Client) getAuthToken() {
 }
 
 func (c *Client) CreateUser() (User, error) {
+	fmt.Println("Creating a new User... gilfoyle (⌐■_■)")
 	rel := &url.URL{Path: "/users"}
 	u := c.BaseURL.ResolveReference(rel)
 
@@ -140,6 +143,7 @@ func (c *Client) CreateUser() (User, error) {
 }
 
 func (c *Client) Connect(userId string) (Job, error) {
+	fmt.Println("Connecting and waiting for a new Job...")
 	rel := &url.URL{Path: "/users/" + userId + "/connections"}
 	u := c.BaseURL.ResolveReference(rel)
 
@@ -173,6 +177,7 @@ func (c *Client) Connect(userId string) (Job, error) {
 }
 
 func (c *Client) CheckOnJob(jobId string) (string, error) {
+	fmt.Print("Waiting...")
 	rel := &url.URL{Path: "/jobs/" + jobId}
 	u := c.BaseURL.ResolveReference(rel)
 	req, err := http.NewRequest("GET", u.String(), nil)
@@ -196,11 +201,13 @@ func (c *Client) CheckOnJob(jobId string) (string, error) {
 		index, _ := job.findStepIndexByTitle("retrieve-transactions")
 		// Job finished, return link
 		if job.Steps[index].Status == "success" {
+			fmt.Println(" Got the job!")
 			return job.Steps[index].Result.URL, nil
 		}
 		if job.Steps[index].Status == "failed" {
 			return job.Steps[index].Result.URL, errors.New("transaction job failed on server")
 		}
+		fmt.Print("..")
 	}
 
 	// if we got here probably
@@ -208,6 +215,7 @@ func (c *Client) CheckOnJob(jobId string) (string, error) {
 }
 
 func NewClient(baseURL string, apiVersion string, http *http.Client) *Client {
+	fmt.Println("Client initializing...")
 	base, err := url.Parse(baseURL)
 	if err != nil {
 		log.Fatalf("Could not parse Base URL: %v\n", err)
