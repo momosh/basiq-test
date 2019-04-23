@@ -12,7 +12,7 @@ Well, there are few simple things needing to be done before running this:
 
 ```json
 {
-  "APIKey": "YOUR API KEY GOES HERE"
+  "api_key": "YOUR API KEY GOES HERE"
 }
 ```
 
