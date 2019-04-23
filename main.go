@@ -20,6 +20,22 @@ type Client struct {
 	httpClient *http.Client
 }
 
+type Institution struct {
+	ID string
+}
+
+type Connection struct {
+	LoginID     string
+	Password    string
+	Institution Institution
+}
+
+type User struct {
+	ID     string `json:"id,omitempty"`
+	Email  string `json:"email"`
+	Mobile string `json:"mobile"`
+}
+
 func (c *Client) loadAPIKey() {
 	apiKey, exists := os.LookupEnv("API_KEY")
 	if exists == true {
@@ -65,6 +81,34 @@ func (c *Client) getAuthToken() {
 	}
 }
 
+func (c *Client) CreateUser() (User, error) {
+	rel := &url.URL{Path: "/users"}
+	u := c.BaseURL.ResolveReference(rel)
+
+	user := User{
+		Email:  "gilfoyle@ppipper.com",
+		Mobile: "+61410999666",
+	}
+	data, _ := json.Marshal(user)
+	req, err := http.NewRequest("POST", u.String(), bytes.NewBuffer(data))
+	if err != nil {
+		log.Fatalf("Could not create New Request: %v\n", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.AccessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		log.Fatalf("Creating new User failed: %v\n", err)
+	}
+	defer res.Body.Close()
+
+	var resUser User
+	err = json.NewDecoder(res.Body).Decode(&resUser)
+
+	return resUser, err
+}
+
 func NewClient(baseURL string, apiVersion string, http *http.Client) *Client {
 	base, err := url.Parse(baseURL)
 	if err != nil {
@@ -87,6 +131,8 @@ func main() {
 		Timeout: time.Second * 2, // Maximum of 2 secs
 	}
 	client := NewClient("https://au-api.basiq.io", "2.0", http)
+	user, _ := client.CreateUser()
 
-	fmt.Printf("Config is: %+v\n\n", client)
+	fmt.Printf("User ID: %v\n", user.ID)
+	fmt.Printf("User Email: %v\n", user.Email)
 }
