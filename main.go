@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -34,6 +35,33 @@ type User struct {
 	ID     string `json:"id,omitempty"`
 	Email  string `json:"email"`
 	Mobile string `json:"mobile"`
+}
+
+type Job struct {
+	ID    string `json:"id"`
+	Type  string `json:"type"`
+	Steps []Step `json:"steps,omitempty"`
+}
+
+type Step struct {
+	Title  string `json:"title"`
+	Status string `json:"status"`
+	Result Result `json:"result,omitempty"`
+}
+
+type Result struct {
+	Type string `json:"type"`
+	URL  string `json:"url"`
+}
+
+func (j *Job) findStepIndexByTitle(title string) (int, error) {
+	for i := range j.Steps {
+		if j.Steps[i].Title == title {
+			return i, nil
+		}
+	}
+
+	return -1, errors.New("found nothing here")
 }
 
 func (c *Client) loadAPIKey() {
@@ -93,6 +121,7 @@ func (c *Client) CreateUser() (User, error) {
 	req, err := http.NewRequest("POST", u.String(), bytes.NewBuffer(data))
 	if err != nil {
 		log.Fatalf("Could not create New Request: %v\n", err)
+		return User{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.AccessToken)
 	req.Header.Set("Content-Type", "application/json")
@@ -100,6 +129,7 @@ func (c *Client) CreateUser() (User, error) {
 	res, err := c.httpClient.Do(req)
 	if err != nil {
 		log.Fatalf("Creating new User failed: %v\n", err)
+		return User{}, err
 	}
 	defer res.Body.Close()
 
@@ -107,6 +137,74 @@ func (c *Client) CreateUser() (User, error) {
 	err = json.NewDecoder(res.Body).Decode(&resUser)
 
 	return resUser, err
+}
+
+func (c *Client) Connect(userId string) (Job, error) {
+	rel := &url.URL{Path: "/users/" + userId + "/connections"}
+	u := c.BaseURL.ResolveReference(rel)
+
+	user := Connection{
+		LoginID:  "gavinBelson",
+		Password: "hooli2016",
+		Institution: Institution{
+			ID: "AU00000",
+		},
+	}
+	data, _ := json.Marshal(user)
+	req, err := http.NewRequest("POST", u.String(), bytes.NewBuffer(data))
+	if err != nil {
+		log.Fatalf("Could not create New Request: %v\n", err)
+		return Job{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.AccessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		log.Fatalf("Creating new Connection failed: %v\n", err)
+		return Job{}, err
+	}
+	defer res.Body.Close()
+
+	var job Job
+	err = json.NewDecoder(res.Body).Decode(&job)
+
+	return job, err
+}
+
+func (c *Client) CheckOnJob(jobId string) (string, error) {
+	rel := &url.URL{Path: "/jobs/" + jobId}
+	u := c.BaseURL.ResolveReference(rel)
+	req, err := http.NewRequest("GET", u.String(), nil)
+	if err != nil {
+		log.Fatalf("Could not create New Request: %v\n", err)
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.AccessToken)
+
+	// check every 5 seconds
+	for range time.Tick(time.Second * 5) {
+		res, err := c.httpClient.Do(req)
+		if err != nil {
+			log.Fatalf("Creating new Connection failed: %v\n", err)
+			return "", err
+		}
+		defer res.Body.Close()
+
+		var job Job
+		err = json.NewDecoder(res.Body).Decode(&job)
+		index, _ := job.findStepIndexByTitle("retrieve-transactions")
+		// Job finished, return link
+		if job.Steps[index].Status == "success" {
+			return job.Steps[index].Result.URL, nil
+		}
+		if job.Steps[index].Status == "failed" {
+			return job.Steps[index].Result.URL, errors.New("transaction job failed on server")
+		}
+	}
+
+	// if we got here probably
+	return "", err
 }
 
 func NewClient(baseURL string, apiVersion string, http *http.Client) *Client {
@@ -132,7 +230,8 @@ func main() {
 	}
 	client := NewClient("https://au-api.basiq.io", "2.0", http)
 	user, _ := client.CreateUser()
+	job, _ := client.Connect(user.ID)
+	transactionsLink, _ := client.CheckOnJob(job.ID)
 
-	fmt.Printf("User ID: %v\n", user.ID)
-	fmt.Printf("User Email: %v\n", user.Email)
+	fmt.Printf("TRANSACTIONS: %+v\n", transactionsLink)
 }
