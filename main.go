@@ -54,6 +54,29 @@ type Result struct {
 	URL  string `json:"url"`
 }
 
+type Transaction struct {
+	Amount   string   `json:"amount"`
+	SubClass SubClass `json:"subClass"`
+}
+
+type SubClass struct {
+	Title string `json:"title"`
+	Code  string `json:"code"`
+}
+
+type Response struct {
+	Type  string        `json:"type"`
+	Count int64         `json:"count"`
+	Size  int64         `json:"size"`
+	Data  []Transaction `json:"data"`
+}
+
+type Stats struct {
+	Title        string
+	Transactions uint16
+	Average      float32
+}
+
 func (j *Job) findStepIndexByTitle(title string) (int, error) {
 	for i := range j.Steps {
 		if j.Steps[i].Title == title {
@@ -187,8 +210,8 @@ func (c *Client) CheckOnJob(jobId string) (string, error) {
 	}
 	req.Header.Set("Authorization", "Bearer "+c.AccessToken)
 
-	// check every 5 seconds
-	for range time.Tick(time.Second * 5) {
+	// check in every 3 seconds
+	for range time.Tick(time.Second * 3) {
 		res, err := c.httpClient.Do(req)
 		if err != nil {
 			log.Fatalf("Creating new Connection failed: %v\n", err)
@@ -214,6 +237,30 @@ func (c *Client) CheckOnJob(jobId string) (string, error) {
 	return "", err
 }
 
+func (c *Client) GetTransactions(path string) ([]Transaction, error) {
+	fmt.Println("Fetching Transactions...")
+	rel, _ := url.Parse(path)
+	u := c.BaseURL.ResolveReference(rel)
+	req, err := http.NewRequest("GET", u.String(), nil)
+	if err != nil {
+		log.Fatalf("Could not create New Request: %v\n", err)
+		return []Transaction{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.AccessToken)
+
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		log.Fatalf("Creating new Connection failed: %v\n", err)
+		return []Transaction{}, err
+	}
+	defer res.Body.Close()
+
+	var transactionResponse Response
+	err = json.NewDecoder(res.Body).Decode(&transactionResponse)
+
+	return transactionResponse.Data, err
+}
+
 func NewClient(baseURL string, apiVersion string, http *http.Client) *Client {
 	fmt.Println("Client initializing...")
 	base, err := url.Parse(baseURL)
@@ -234,12 +281,13 @@ func NewClient(baseURL string, apiVersion string, http *http.Client) *Client {
 
 func main() {
 	http := &http.Client{
-		Timeout: time.Second * 2, // Maximum of 2 secs
+		Timeout: time.Second * 5,
 	}
 	client := NewClient("https://au-api.basiq.io", "2.0", http)
 	user, _ := client.CreateUser()
 	job, _ := client.Connect(user.ID)
 	transactionsLink, _ := client.CheckOnJob(job.ID)
+	transactions, _ := client.GetTransactions(transactionsLink)
 
-	fmt.Printf("TRANSACTIONS: %+v\n", transactionsLink)
+	fmt.Printf("RES: %+v\n", transactions)
 }
