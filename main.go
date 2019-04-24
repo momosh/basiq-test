@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"net/http"
@@ -136,94 +137,108 @@ func (c *Client) getAuthToken() {
 	}
 }
 
-func (c *Client) CreateUser() (User, error) {
-	fmt.Println("Creating a new User... gilfoyle (⌐■_■)")
-	rel := &url.URL{Path: "/users"}
+func (c *Client) newRequest(method, path string, body interface{}) (*http.Request, error) {
+	rel, err := url.Parse(path)
+	if err != nil {
+		log.Fatalf("Parsing URL failed: %v\n", err)
+		return nil, err
+	}
 	u := c.BaseURL.ResolveReference(rel)
 
+	var buf io.ReadWriter
+	if body != nil {
+		buf = new(bytes.Buffer)
+		err := json.NewEncoder(buf).Encode(body)
+		if err != nil {
+			log.Fatalf("Decoding Body failed: %v\n", err)
+			return nil, err
+		}
+	}
+
+	req, err := http.NewRequest(method, u.String(), buf)
+	if err != nil {
+		log.Fatalf("Could not create New Request: %v\n", err)
+		return nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.AccessToken)
+
+	return req, nil
+}
+
+func (c *Client) do(req *http.Request, v interface{}) (*http.Response, error) {
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	err = json.NewDecoder(resp.Body).Decode(v)
+
+	return resp, err
+}
+
+func (c *Client) CreateUser() (User, error) {
+	fmt.Println("Creating a new User... gilfoyle (⌐■_■)")
 	user := User{
 		Email:  "gilfoyle@ppipper.com",
 		Mobile: "+61410999666",
 	}
-	data, _ := json.Marshal(user)
-	req, err := http.NewRequest("POST", u.String(), bytes.NewBuffer(data))
+	req, err := c.newRequest("POST", "/users", user)
 	if err != nil {
-		log.Fatalf("Could not create New Request: %v\n", err)
 		return User{}, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.AccessToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	res, err := c.httpClient.Do(req)
-	if err != nil {
-		log.Fatalf("Creating new User failed: %v\n", err)
-		return User{}, err
-	}
-	defer res.Body.Close()
 
 	var resUser User
-	err = json.NewDecoder(res.Body).Decode(&resUser)
+	_, err = c.do(req, &resUser)
+	if err != nil {
+		return User{}, err
+	}
 
-	return resUser, err
+	return resUser, nil
 }
 
 func (c *Client) Connect(userId string) (Job, error) {
 	fmt.Println("Connecting and waiting for a new Job...")
-	rel := &url.URL{Path: "/users/" + userId + "/connections"}
-	u := c.BaseURL.ResolveReference(rel)
-
-	user := Connection{
+	connection := Connection{
 		LoginID:  "gavinBelson",
 		Password: "hooli2016",
 		Institution: Institution{
 			ID: "AU00000",
 		},
 	}
-	data, _ := json.Marshal(user)
-	req, err := http.NewRequest("POST", u.String(), bytes.NewBuffer(data))
+	req, err := c.newRequest("POST", "/users/"+userId+"/connections", connection)
 	if err != nil {
-		log.Fatalf("Could not create New Request: %v\n", err)
 		return Job{}, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.AccessToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	res, err := c.httpClient.Do(req)
-	if err != nil {
-		log.Fatalf("Creating new Connection failed: %v\n", err)
-		return Job{}, err
-	}
-	defer res.Body.Close()
 
 	var job Job
-	err = json.NewDecoder(res.Body).Decode(&job)
+	_, err = c.do(req, &job)
+	if err != nil {
+		return Job{}, err
+	}
 
-	return job, err
+	return job, nil
 }
 
 func (c *Client) CheckOnJob(jobId string) (string, error) {
 	fmt.Print("Waiting...")
-	rel := &url.URL{Path: "/jobs/" + jobId}
-	u := c.BaseURL.ResolveReference(rel)
-	req, err := http.NewRequest("GET", u.String(), nil)
+	req, err := c.newRequest("GET", "/jobs/"+jobId, nil)
 	if err != nil {
-		log.Fatalf("Could not create New Request: %v\n", err)
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.AccessToken)
 
 	// check in every 3 seconds
 	for range time.Tick(time.Second * 3) {
-		res, err := c.httpClient.Do(req)
+		var job Job
+		_, err = c.do(req, &job)
 		if err != nil {
-			log.Fatalf("Creating new Connection failed: %v\n", err)
 			return "", err
 		}
-		defer res.Body.Close()
-
-		var job Job
-		err = json.NewDecoder(res.Body).Decode(&job)
 		index, _ := job.findStepIndexByTitle("retrieve-transactions")
+
 		// Job finished, return link
 		if job.Steps[index].Status == "success" {
 			fmt.Println(" Got the job!")
@@ -232,33 +247,26 @@ func (c *Client) CheckOnJob(jobId string) (string, error) {
 		if job.Steps[index].Status == "failed" {
 			return job.Steps[index].Result.URL, errors.New("transaction job failed on server")
 		}
+
 		fmt.Print("..")
 	}
 
-	// if we got here probably
-	return "", err
+	// if we got here probably error happened
+	return "", errors.New("something went wrong")
 }
 
 func (c *Client) GetTransactions(path string) ([]Transaction, error) {
 	fmt.Println("Fetching Transactions...")
-	rel, _ := url.Parse(path)
-	u := c.BaseURL.ResolveReference(rel)
-	req, err := http.NewRequest("GET", u.String(), nil)
+	req, err := c.newRequest("GET", path, nil)
 	if err != nil {
-		log.Fatalf("Could not create New Request: %v\n", err)
-		return []Transaction{}, err
+		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.AccessToken)
-
-	res, err := c.httpClient.Do(req)
-	if err != nil {
-		log.Fatalf("Creating new Connection failed: %v\n", err)
-		return []Transaction{}, err
-	}
-	defer res.Body.Close()
 
 	var transactionResponse Response
-	err = json.NewDecoder(res.Body).Decode(&transactionResponse)
+	_, err = c.do(req, &transactionResponse)
+	if err != nil {
+		return nil, err
+	}
 
 	return transactionResponse.Data, err
 }
