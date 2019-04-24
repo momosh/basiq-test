@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -71,10 +73,10 @@ type Response struct {
 	Data  []Transaction `json:"data"`
 }
 
-type Stats struct {
-	Title        string
-	Transactions uint16
-	Average      float32
+type Status struct {
+	Title             string
+	NumOfTransactions int
+	Sum               float64
 }
 
 func (j *Job) findStepIndexByTitle(title string) (int, error) {
@@ -261,6 +263,46 @@ func (c *Client) GetTransactions(path string) ([]Transaction, error) {
 	return transactionResponse.Data, err
 }
 
+func (s *Status) AddTransaction(transaction Transaction) {
+	s.NumOfTransactions++
+	s.Title = transaction.SubClass.Title
+
+	amount, _ := strconv.ParseFloat(transaction.Amount, 64)
+	s.Sum += (math.Abs(amount))
+}
+
+func (s *Status) PrintAverage() {
+	average := s.Sum / float64(s.NumOfTransactions)
+
+	fmt.Println("-----------------------------------------------------")
+	fmt.Printf("Category: %v\n", s.Title)
+	fmt.Printf("Number of Transactions: %v\n", s.NumOfTransactions)
+	fmt.Printf("Average Amount: %.3f\n", average)
+}
+
+func mapTransactions(transactions []Transaction) map[string]*Status {
+	m := make(map[string]*Status)
+
+	for _, transaction := range transactions {
+		// we don't know where those without the code belong to
+		// skip them
+		code := transaction.SubClass.Code
+		if code == "" {
+			continue
+		}
+
+		storedStat, ok := m[code]
+		if ok {
+			storedStat.AddTransaction(transaction)
+		} else {
+			m[code] = &Status{}
+			m[code].AddTransaction(transaction)
+		}
+	}
+
+	return m
+}
+
 func NewClient(baseURL string, apiVersion string, http *http.Client) *Client {
 	fmt.Println("Client initializing...")
 	base, err := url.Parse(baseURL)
@@ -279,6 +321,15 @@ func NewClient(baseURL string, apiVersion string, http *http.Client) *Client {
 	return c
 }
 
+func printAverage(m map[string]*Status) {
+	fmt.Println()
+	fmt.Println("Hey, big spender:")
+
+	for _, status := range m {
+		status.PrintAverage()
+	}
+}
+
 func main() {
 	http := &http.Client{
 		Timeout: time.Second * 5,
@@ -288,6 +339,7 @@ func main() {
 	job, _ := client.Connect(user.ID)
 	transactionsLink, _ := client.CheckOnJob(job.ID)
 	transactions, _ := client.GetTransactions(transactionsLink)
+	mappedTransactions := mapTransactions(transactions)
 
-	fmt.Printf("RES: %+v\n", transactions)
+	printAverage(mappedTransactions)
 }
